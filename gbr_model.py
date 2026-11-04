@@ -20,7 +20,16 @@ MODEL_VERSION = 2
 
 
 def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
-    """Train the notebook's model and persist its preprocessing metadata."""
+    """
+    Train the notebook's model and persist its preprocessing metadata.
+
+    Args:
+        dataset_path: Path to the dataset file.
+        artifact_path: Path to save the model artifact.
+    
+    Returns:
+        A dictionary containing the trained model and its metadata.
+    """
     data = pd.read_excel(dataset_path, sheet_name="data")
     if TARGET not in data.columns:
         raise ValueError(f"Dataset must contain a '{TARGET}' column.")
@@ -101,7 +110,15 @@ def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
 
 
 def load_model(artifact_path: str | Path) -> dict:
-    """Load a persisted model artifact."""
+    """
+    Load a persisted model artifact.
+
+    Args:
+        artifact_path: Path to the model artifact.
+    
+    Returns:
+        A dictionary containing the loaded model and its metadata.
+    """
     artifact = joblib.load(artifact_path)
     required_keys = {
         "preprocessor",
@@ -118,7 +135,16 @@ def load_model(artifact_path: str | Path) -> dict:
 
 
 def predict_probability(artifact: Mapping, student: Mapping[str, object]) -> float:
-    """Return the predicted enrollment probability for one student."""
+    """
+    Return the predicted enrollment probability for one student.
+
+    Args:
+        artifact: The trained model artifact.
+        student: A dictionary containing the student's data.
+    
+    Returns:
+        The predicted enrollment probability.
+    """
     columns = artifact["numeric_columns"] + artifact["categorical_columns"]
     row = {
         column: (
