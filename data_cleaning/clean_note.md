@@ -1,12 +1,30 @@
 # Data Cleaning Notes
 
-**Raw data:** 69,557 rows × 67 columns → **Cleaned:** 69,554 rows × 58 columns (`data_clean.csv`)
+## Pipeline
+
+```
+datathon-dataset.xlsx
+  → clean_data.py → data_clean.csv          (69,556 × 58; sections 1–7)
+  → make_may1.py  → data_may1.csv           (68,910 × 57; section 8)
+                    + late_applicants_by_year.csv
+  → make_days.py  → data_may1_days.csv      (68,910 × 57; section 9; modeling input)
+```
+
+Run all three steps from the raw file (works from any folder; all files are read and written in the project folder):
+
+```
+python data_cleaning/run_all.py
+```
+
+**Raw data:** 69,557 rows × 67 columns → **Cleaned:** 69,556 rows × 58 columns (`data_clean.csv`, produced by `clean_data.py`)
 
 Principle: the cleaning step only fixes clear errors and standardizes formats. Variables are not filtered by prediction cutoff at this stage. Values that look unusual but could be real are recorded, not changed.
 
-## 1. Rows removed (3 rows, none enrolled)
-- 2 rows with application date after Aug 25 of the entry year (assumed semester start)
-- 1 row with application year 2018, four years before entry
+Assumed term start: **Aug 31 of `entry_year`** (`TERM_START_MONTH`, `TERM_START_DAY` in `clean_data.py`). "After term start" means strictly later than Aug 31; Aug 31 itself is not late.
+
+## 1. Rows removed (1 row, not enrolled)
+- 1 row with application year 2018, four years before entry (row_id 12703)
+- Rule also drops applications after term start, but no row has `app_date` later than Aug 31 of its entry year
 
 ## 2. Columns removed
 - `student_id`: 10 IDs are shared by 24 rows (verified to be different people), and 2 rows are missing. Replaced by `row_id` (original row order).
@@ -27,13 +45,15 @@ Principle: the cleaning step only fixes clear errors and standardizes formats. V
 
 ## 5. Encoding and new variables
 - `acceptance_fee`: missing filled with `"NotPaid"`. The 3 missing values in `app_fee` are kept as NA.
-- New `deposit_paid`: 1 if any of `deposited`, `acceptance_fee`, or the raw deposit record (year present) shows a deposit. 26,434 students; 87.0% of them enrolled. 4 rows (row_id 22865, 48848, 53163, 54359) are flagged by deposit year only.
+- New `deposit_paid`: 1 if any of `deposited`, `acceptance_fee`, or the raw deposit record (year present) shows a deposit. 26,434 students; 87.0% of them enrolled. 383 rows are flagged as paid only through the deposit record (`deposited = 0` and `acceptance_fee = NotPaid`); 379 of them have a full deposit date and 4 (row_id 22865, 48848, 53163, 54359) have a deposit year but no month.
 
 ## 6. Known issues (not changed)
 - **2025 cohort is recorded differently:** lower ACT share, higher SAT share, lower rates for the assistance flags and `grad_expct`, and 155 enrolled students with no deposit date.
-- **`deposited` behaves like "deposited and enrolled":** about 2,800 students who paid but did not enroll have `deposited = 0`.
-- **SAT:** about 15% of composite scores do not equal verbal + math.
+- **`deposited` behaves like "deposited and enrolled":** 3,224 students who paid a deposit (by the `deposit_paid` definition) but did not enroll have `deposited = 0`; in addition, 3 students have `deposited = 0` but enrolled, and 201 have `deposited = 1` but did not enroll.
+- **SAT:** 25.1% of the 7,802 SAT records have a composite that does not equal verbal + math (14% differ by 50 points or more). The mismatch is concentrated in the 2024 cohort (98.4%); other cohorts range from 12% to 20%.
+- **2024 cohort SAT recording:** the 2024 cohort appears to record SAT composite scores differently, similar to the recording differences seen in 2025.
 - **`hs_rank = 0`:** 91 students, none enrolled; possibly a placeholder.
+- **Dates after term start:** 1 `deposit_date` (row_id 913, entry 2022, 2022-09-04) is later than Aug 31 and is kept as is. No `visit_date` or `first_contact_date` is later than term start.
 
 ## 7. Variables
 
@@ -87,8 +107,8 @@ Principle: the cleaning step only fixes clear errors and standardizes formats. V
 | 46 | `coll_calc_cr` | College calculus credits before entry | float64 |
 | 47 | `coll_math` | College math credits before entry (sum of 43–46) | float64 |
 | 48 | `coll_sci` | College science credits before entry | float64 |
-| 49 | `hs_only_math` | High-school-only math credits (= `hs_math` − `coll_math`) | float64 |
-| 50 | `hs_only_sci` | High-school-only science credits (= `hs_sci` − `coll_sci`) | float64 |
+| 49 | `hs_only_math` | High-school-only math credits. Approximately `hs_math` − `coll_math`; the relationship holds for about 98.6% of rows where all three values are present. This is inferred from the data, not stated in the data dictionary. | float64 |
+| 50 | `hs_only_sci` | High-school-only science credits. Approximately `hs_sci` − `coll_sci`; the relationship holds for about 98.5% of rows where all three values are present. This is inferred from the data, not stated in the data dictionary. | float64 |
 | 51 | `rotc_interest` | Interested in ROTC | int64, 0/1 |
 | 52 | `miles_from_campus` | Distance from home to campus (miles) | float64 |
 | 53 | `veteran` | Veteran or family member eligible for veteran benefits | int64, 0/1 |
@@ -99,3 +119,29 @@ Principle: the cleaning step only fixes clear errors and standardizes formats. V
 | 58 | `college` | College applied to (6 colleges) | string |
 
 Numeric columns with missing values are read as float64 even when all values are whole numbers.
+
+## 8. As-of-May-1 dataset (`make_may1.py`)
+
+Goal: keep only what is known on the cutoff, **May 1 of `entry_year`** (`CUTOFF_MONTH`, `CUTOFF_DAY` in `make_may1.py`). "After the cutoff" means strictly later than May 1. Steps run in this order:
+
+1. **Late applicants removed:** 646 rows with `app_date` after the cutoff (187 enrolled). Their applied / admitted / enrolled counts by `entry_year` are saved first to `late_applicants_by_year.csv`, for use when predicting class totals.
+2. **Visits after the cutoff (15 rows):** `visit_date` → NA and `campus_visit_tot` − 1. All 15 had one visit, so all become 0.
+3. **Deposits after the cutoff (749 rows, 682 enrolled):** `deposit_date` → NA, `deposit_paid` → 0, `acceptance_fee` → `"NotPaid"`. Rows paid with no `deposit_date` (752) are left as paid, since the payment cannot be dated.
+4. **First contact:** checked that no `first_contact_date` is after `app_date` or the cutoff (none).
+5. **`deposited` dropped:** it has no date and nearly equals the outcome (see section 6).
+
+`admitted` and `app_completed` are assumed to be known by the cutoff. All other columns are unchanged.
+
+## 9. Days before term start (`make_days.py`)
+
+The four dates are replaced, in place, by whole days before term start (Aug 31 of `entry_year`, taken from `clean_data.py`): `app_days_before_start`, `contact_days_before_start`, `visit_days_before_start`, `deposit_days_before_start`. All values are ≥ 122 (May 1 to Aug 31).
+
+Missing dates stay missing and are not filled; the gap has meaning: no campus visit, no deposit by the cutoff (or paid with no date), or no recorded first contact.
+
+Read with integer day columns:
+
+```python
+days = ["app_days_before_start", "contact_days_before_start",
+        "visit_days_before_start", "deposit_days_before_start"]
+df = pd.read_csv("data_may1_days.csv", dtype={c: "Int64" for c in days})
+```

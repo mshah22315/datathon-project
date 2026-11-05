@@ -1,6 +1,8 @@
 # Visualizations
 
-All charts are built from `data_clean.csv` (output of `clean_data.py`; 69,554 applicants, entry years 2022–2026). Each script is run from the project folder and writes a PNG at 200 dpi plus a CSV of the plotted numbers.
+All charts are built from `data_clean.csv` (output of `clean_data.py`; entry years 2022–2026).
+
+> **Note:** The charts and numbers below were made from the old cleaned data (69,554 applicants, assumed term start Aug 25). The current `data_clean.csv` has 69,556 applicants (term start Aug 31; 2 non-admitted, non-enrolled applicants restored), so the charts need to be regenerated. Each script is run from the project folder and writes a PNG at 200 dpi plus a CSV of the plotted numbers.
 
 **Conventions.** Background `#fcfcfb`, text `#0b0b0b`, secondary text `#52514e`, DejaVu Sans, no axis frames. Magnitudes use single-hue ColorBrewer ramps (RdPu or Blues); red `#b2182b` marks losses or the weakest group. Residency labels: Resident = In-state, Contiguous = Bordering state, Non-Contiguous = Non-bordering state. "Enrollment rate" is the mean of `enrolled` within a group.
 
@@ -32,7 +34,7 @@ All charts are built from `data_clean.csv` (output of `clean_data.py`; 69,554 ap
 
 - **File:** `funnel.png` — `viz_funnel.py`; table `funnel_table.csv`
 - **Question:** Where are applicants lost between application and enrollment, and does it differ by residency?
-- **Data:** All 69,554 applicants. Stages: Applied → Completed application (67,156) → Admitted (62,071) → Paid deposit (26,378) → Enrolled (23,009). Paid deposit = admitted and `deposit_paid == 1` (deposited flag, acceptance fee, or a raw deposit year); 56 non-admitted students with a deposit record are left out of that stage.
+- **Data:** All 69,554 applicants (old data). Stages: Applied → Completed application (67,156) → Admitted (62,071) → Paid deposit (26,378) → Enrolled (23,009). Paid deposit = admitted and `deposit_paid == 1` (deposited flag, acceptance fee, or a raw deposit year); 56 non-admitted students with a deposit record are left out of that stage.
 - **How to read:** Bars are stacked by residency and top-aligned; bar height is the number of students. Ribbons connect each group's retained students to the next stage, and red numbers are the students lost between stages.
 - **Key findings:**
   - The largest loss is between admission and deposit: 35,693 admitted students (58%) never pay a deposit.

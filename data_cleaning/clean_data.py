@@ -12,10 +12,13 @@ import argparse
 import numpy as np
 import pandas as pd
 
-RAW_PATH = "datathon-dataset-2026.xlsx"
+RAW_PATH = "datathon-dataset.xlsx"
 RAW_SHEET = "data"
 OUT_PATH = "data_clean.csv"
 DATE_COLS = ["app_date", "deposit_date", "visit_date", "first_contact_date"]
+# Assumed term start: TERM_START_MONTH/TERM_START_DAY of entry_year. "After term start" means
+# strictly later than this date (the day itself is not late).
+TERM_START_MONTH, TERM_START_DAY = 8, 31
 
 MONTHS = {m: i for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
@@ -44,8 +47,8 @@ def replace_with(df, new_col, values, drop_cols, at):
 
 
 def term_start(df):
-    """Assumed term start: Aug 25 of entry_year."""
-    return pd.to_datetime(dict(year=df["entry_year"], month=8, day=25))
+    """Assumed term start of each row: TERM_START_MONTH/TERM_START_DAY of entry_year."""
+    return pd.to_datetime(dict(year=df["entry_year"], month=TERM_START_MONTH, day=TERM_START_DAY))
 
 
 def clean(raw):
@@ -63,7 +66,7 @@ def clean(raw):
     app_date = build_date(df["app_yr"], month_num(df["app_mo"]), df["app_dt"].fillna(15),
                           pd.Series(True, index=df.index))
     df.insert(df.columns.get_loc("app_dt"), "app_date", app_date)
-    # Drop applications after term start or with app_yr == 2018 (row_id 11320, 12703, 27351)
+    # Drop applications after term start (none at Aug 31) or with app_yr == 2018 (row_id 12703)
     df = df.loc[~((df["app_date"] > term_start(df)) | (df["app_yr"] == 2018))]
     df = df.drop(columns=["app_yr", "app_mo", "app_dt"])
 
@@ -108,7 +111,9 @@ def clean(raw):
     df.loc[df["age"] < 14, "age"] = np.nan
 
     # deposit_paid: 1 if any source shows a deposit (deposited, acceptance_fee, or raw deposit_yr
-    # present). Row_id 22865, 48848, 53163, 54359 are paid only by deposit_yr.
+    # present). 383 rows are paid only through the deposit record (deposited = 0 and
+    # acceptance_fee = NotPaid): 379 have a full deposit date, and 4 (row_id 22865, 48848,
+    # 53163, 54359) have a deposit year but no month.
     raw_dep_yr = raw.loc[df["row_id"], "deposit_yr"].notna().to_numpy()
     deposit_paid = (df["deposited"] == 1) | (df["acceptance_fee"] != "NotPaid") | raw_dep_yr
     df.insert(df.columns.get_loc("deposited") + 1, "deposit_paid", deposit_paid.astype("int64"))
@@ -125,6 +130,17 @@ def main():
     df = clean(pd.read_excel(args.raw, sheet_name=RAW_SHEET))
     df.to_csv(args.out, index=False)
     print(f"Saved {args.out}: {df.shape[0]} rows x {df.shape[1]} columns")
+    report_late(df)
+
+
+def report_late(df):
+    """Print dates later than term start. Recorded only; these values are not changed."""
+    start = term_start(df)
+    for col in ["deposit_date", "visit_date", "first_contact_date"]:
+        late = df[col] > start
+        print(f"{col} after term start: {late.sum()} rows")
+        if late.any():
+            print(df.loc[late, ["row_id", "entry_year", col]].to_string(index=False))
 
 
 if __name__ == "__main__":
