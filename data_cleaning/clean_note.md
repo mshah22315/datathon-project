@@ -5,15 +5,16 @@
 ```
 datathon-dataset.xlsx
   → clean_data.py → data_clean.csv          (69,556 × 58; sections 1–7)
-  → make_may1.py  → data_may1.csv           (68,910 × 57; section 8)
-                    + late_applicants_by_year.csv
-  → make_days.py  → data_may1_days.csv      (68,910 × 57; section 9; modeling input)
+  → make_asof.py  → data_asof_0501.csv      (68,910 × 57; section 8; modeling input)
+                    + late_applicants_0501.csv
 ```
 
-Run all three steps from the raw file (works from any folder; all files are read and written in the project folder):
+Run both steps from the raw file (works from any folder; all files are read and written in the project folder). Arguments after `run_all.py` are passed to `make_asof.py`:
 
 ```
-python data_cleaning/run_all.py
+python data_cleaning/run_all.py                          # cutoff May 1 (default)
+python data_cleaning/run_all.py --cutoff 03-01           # another cutoff -> data_asof_0301.csv
+python data_cleaning/run_all.py --save-dated             # also data_asof_0501_dated.csv (dates, before conversion to days)
 ```
 
 **Raw data:** 69,557 rows × 67 columns → **Cleaned:** 69,556 rows × 58 columns (`data_clean.csv`, produced by `clean_data.py`)
@@ -120,28 +121,28 @@ Assumed term start: **Aug 31 of `entry_year`** (`TERM_START_MONTH`, `TERM_START_
 
 Numeric columns with missing values are read as float64 even when all values are whole numbers.
 
-## 8. As-of-May-1 dataset (`make_may1.py`)
+## 8. As-of-cutoff dataset (`make_asof.py`)
 
-Goal: keep only what is known on the cutoff, **May 1 of `entry_year`** (`CUTOFF_MONTH`, `CUTOFF_DAY` in `make_may1.py`). "After the cutoff" means strictly later than May 1. Steps run in this order:
+Goal: keep only what is known on the cutoff, given as `--cutoff MM-DD` (default `05-01`) and applied to each row's `entry_year`. "After the cutoff" means strictly later than the cutoff date. Output names carry the cutoff (`0501` below). The numbers below are for the default May 1 cutoff.
 
-1. **Late applicants removed:** 646 rows with `app_date` after the cutoff (187 enrolled). Their applied / admitted / enrolled counts by `entry_year` are saved first to `late_applicants_by_year.csv`, for use when predicting class totals.
+**Step A: cut at the cutoff** (`apply_cutoff()`), in this order:
+
+1. **Late applicants removed:** 646 rows with `app_date` after the cutoff (187 enrolled). Their applied / admitted / enrolled counts by `entry_year` are saved first to `late_applicants_0501.csv`, for use when predicting class totals.
 2. **Visits after the cutoff (15 rows):** `visit_date` → NA and `campus_visit_tot` − 1. All 15 had one visit, so all become 0.
 3. **Deposits after the cutoff (749 rows, 682 enrolled):** `deposit_date` → NA, `deposit_paid` → 0, `acceptance_fee` → `"NotPaid"`. Rows paid with no `deposit_date` (752) are left as paid, since the payment cannot be dated.
 4. **First contact:** checked that no `first_contact_date` is after `app_date` or the cutoff (none).
 5. **`deposited` dropped:** it has no date and nearly equals the outcome (see section 6).
 
-`admitted` and `app_completed` are assumed to be known by the cutoff. All other columns are unchanged.
+`admitted` and `app_completed` are assumed to be known by the cutoff. All other columns are unchanged. With `--save-dated`, this result is also saved as `data_asof_0501_dated.csv` (68,910 × 57, with dates).
 
-## 9. Days before term start (`make_days.py`)
-
-The four dates are replaced, in place, by whole days before term start (Aug 31 of `entry_year`, taken from `clean_data.py`): `app_days_before_start`, `contact_days_before_start`, `visit_days_before_start`, `deposit_days_before_start`. All values are ≥ 122 (May 1 to Aug 31).
+**Step B: dates to days** (`dates_to_days()`): the four dates are replaced, in place, by whole days before term start (Aug 31 of `entry_year`, taken from `clean_data.py`): `app_days_before_start`, `contact_days_before_start`, `visit_days_before_start`, `deposit_days_before_start`. Every value is at least the number of days from the cutoff to term start (122 for May 1). Result: `data_asof_0501.csv`, 68,910 × 57.
 
 Missing dates stay missing and are not filled; the gap has meaning: no campus visit, no deposit by the cutoff (or paid with no date), or no recorded first contact.
 
-Read with integer day columns:
+Read with integer day columns (otherwise columns with missing values load as float):
 
 ```python
 days = ["app_days_before_start", "contact_days_before_start",
         "visit_days_before_start", "deposit_days_before_start"]
-df = pd.read_csv("data_may1_days.csv", dtype={c: "Int64" for c in days})
+df = pd.read_csv("data_asof_0501.csv", dtype={c: "Int64" for c in days})
 ```
