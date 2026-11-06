@@ -8,13 +8,15 @@ Read the output with parsed dates:
     pd.read_csv("data_clean.csv", parse_dates=DATE_COLS)
 """
 import argparse
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-RAW_PATH = "datathon-dataset.xlsx"
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+RAW_PATH = PROJECT_DIR / "datathon-dataset-2026.xlsx"
 RAW_SHEET = "data"
-OUT_PATH = "data_clean.csv"
+OUT_PATH = PROJECT_DIR / "data_clean.csv"
 DATE_COLS = ["app_date", "deposit_date", "visit_date", "first_contact_date"]
 # Assumed term start: TERM_START_MONTH/TERM_START_DAY of entry_year. "After term start" means
 # strictly later than this date (the day itself is not late).

@@ -1,4 +1,4 @@
-"""Train and serve the enrollment Random Forest Regression model."""
+"""Train and serve the enrollment Gradient Boosting Regression model."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Mapping
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -16,8 +16,26 @@ from sklearn.preprocessing import OneHotEncoder, MaxAbsScaler
 
 TARGET = "enrolled"
 FEATURE_IMPORTANCE_THRESHOLD = 0.001
-MODEL_VERSION = 2
+MODEL_VERSION = 3
 PROJECT_DIR = Path(__file__).resolve().parent
+BINARY_CATEGORICAL_COLUMNS = [
+    "app_completed",
+    "admitted",
+    "deposit_paid",
+    "first_generation",
+    "legacy",
+    "stealth",
+    "grad_expct",
+    "ed_plan_asst",
+    "wrtng_asst",
+    "read_asst",
+    "study_skll_asst",
+    "math_asst",
+    "rotc_interest",
+    "veteran",
+    "stem_major",
+    "urm",
+]
 
 
 def load_dataset(dataset_path: str | Path) -> pd.DataFrame:
@@ -26,6 +44,25 @@ def load_dataset(dataset_path: str | Path) -> pd.DataFrame:
     if dataset_path.suffix.lower() == ".csv":
         return pd.read_csv(dataset_path)
     return pd.read_excel(dataset_path, sheet_name="data")
+
+
+def prepare_dataset(data: pd.DataFrame) -> pd.DataFrame:
+    """Apply the notebook's feature typing before training or serving."""
+    data = data.copy()
+    missing_columns = [
+        column
+        for column in BINARY_CATEGORICAL_COLUMNS
+        if column not in data.columns
+    ]
+    if missing_columns:
+        raise ValueError(
+            "Dataset is missing categorical columns: "
+            f"{sorted(missing_columns)}"
+        )
+    data[BINARY_CATEGORICAL_COLUMNS] = data[BINARY_CATEGORICAL_COLUMNS].astype(
+        "category"
+    )
+    return data
 
 
 def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
@@ -39,27 +76,9 @@ def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
     Returns:
         A dictionary containing the trained model and its metadata.
     """
-    data = load_dataset(dataset_path)
+    data = prepare_dataset(load_dataset(dataset_path))
     if TARGET not in data.columns:
         raise ValueError(f"Dataset must contain a '{TARGET}' column.")
-
-    # Convert all binary 0/1 columns except 'enrolled' to categorical type
-    data['app_completed'] = data['app_completed'].astype('category')
-    data['admitted'] = data['admitted'].astype('category')
-    data['deposit_paid'] = data['deposit_paid'].astype('category')
-    data['first_generation'] = data['first_generation'].astype('category')
-    data['legacy'] = data['legacy'].astype('category')
-    data['stealth'] = data['stealth'].astype('category')
-    data['grad_expct'] = data['grad_expct'].astype('category')
-    data['ed_plan_asst'] = data['ed_plan_asst'].astype('category')
-    data['wrtng_asst'] = data['wrtng_asst'].astype('category')
-    data['read_asst'] = data['read_asst'].astype('category')
-    data['study_skll_asst'] = data['study_skll_asst'].astype('category')
-    data['math_asst'] = data['math_asst'].astype('category')
-    data['rotc_interest'] = data['rotc_interest'].astype('category')
-    data['veteran'] = data['veteran'].astype('category')
-    data['stem_major'] = data['stem_major'].astype('category')
-    data['urm'] = data['urm'].astype('category')
 
     X = data.drop(columns=[TARGET])
     y = data[TARGET]
@@ -120,9 +139,10 @@ def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
 
     X_filtered = X_processed[:, selected_indices]
 
-    X_filtered_norm = MaxAbsScaler().fit_transform(X_filtered)
+    scaler = MaxAbsScaler()
+    X_filtered_norm = scaler.fit_transform(X_filtered)
 
-    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    model = GradientBoostingRegressor(n_estimators=100, random_state=42)
     model.fit(X_filtered_norm, y)
 
     artifact = {
@@ -134,6 +154,7 @@ def train_model(dataset_path: str | Path, artifact_path: str | Path) -> dict:
         "processed_feature_names": feature_names.tolist(),
         "selected_features": selected_features,
         "feature_importance_threshold": FEATURE_IMPORTANCE_THRESHOLD,
+        "scaler": scaler,
         "model": model,
     }
     artifact_path = Path(artifact_path)
@@ -159,6 +180,7 @@ def load_model(artifact_path: str | Path) -> dict:
         "categorical_columns",
         "processed_feature_names",
         "selected_features",
+        "scaler",
         "model",
     }
     missing_keys = required_keys.difference(artifact)
@@ -183,7 +205,12 @@ def predict_probability(artifact: Mapping, student: Mapping[str, object]) -> flo
         column: (
             np.nan
             if student.get(column) in ("", None, "(missing)")
-            else student.get(column, np.nan)
+            else (
+                int(student[column])
+                if column in BINARY_CATEGORICAL_COLUMNS
+                and str(student[column]) in {"0", "1"}
+                else student[column]
+            )
         )
         for column in columns
     }
@@ -194,16 +221,87 @@ def predict_probability(artifact: Mapping, student: Mapping[str, object]) -> flo
         for feature in artifact["selected_features"]
     ]
     selected = processed[:, selected_indices]
-    selected_norm = MaxAbsScaler().fit_transform(selected)
+    selected_norm = artifact["scaler"].transform(selected)
     prediction = float(artifact["model"].predict(selected_norm)[0])
     return float(np.clip(prediction, 0.0, 1.0))
+
+
+def predict_dataset(
+    artifact: Mapping,
+    data: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Predict the enrollment probability for each row in the input dataset.
+
+    Args:
+        artifact: The trained model artifact.
+        data: The input dataset.
+
+    Returns:
+        A DataFrame with the input features and the predicted enrollment probabilities.
+    """
+    target = artifact.get("target", TARGET)
+    if target in data.columns:
+        features = data.drop(columns=[target]).copy()
+    else:
+        features = data.copy()
+
+    columns = artifact["numeric_columns"] + artifact["categorical_columns"]
+    missing_columns = sorted(set(columns).difference(features.columns))
+    if missing_columns:
+        raise ValueError(f"Dataset is missing model features: {missing_columns}")
+
+    input_frame = features[columns]
+    processed = artifact["preprocessor"].transform(input_frame)
+    selected_indices = [
+        artifact["processed_feature_names"].index(feature)
+        for feature in artifact["selected_features"]
+    ]
+    selected = processed[:, selected_indices]
+    selected_norm = artifact["scaler"].transform(selected)
+    predictions = np.clip(artifact["model"].predict(selected_norm), 0.0, 1.0)
+
+    features["predicted_probability"] = predictions
+    return features
+
+
+def write_predictions(
+    artifact: Mapping,
+    dataset_path: str | Path,
+    output_path: str | Path,
+) -> pd.DataFrame:
+    """
+    Predict all rows in a dataset and write features and probabilities to CSV.
+
+    Args:
+        artifact: The trained model artifact.
+        dataset_path: The path to the input dataset.
+        output_path: The path to the output CSV file.
+
+    Returns:
+        A DataFrame with the input features and the predicted enrollment probabilities.
+    """
+    data = prepare_dataset(load_dataset(dataset_path))
+    predictions = predict_dataset(artifact, data)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    predictions.to_csv(output_path, index=False)
+    return predictions
+
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", default=PROJECT_DIR / "data_asof_0501.csv")
-    parser.add_argument("--output", default=PROJECT_DIR / "artifacts/rfr_model.joblib")
+    parser.add_argument("--output", default=PROJECT_DIR / "artifacts/gbr_model.joblib")
+    parser.add_argument(
+        "--predictions-output",
+        default=PROJECT_DIR / "artifacts/gbr_predictions.csv",
+        help="CSV path for input features and predicted enrollment probabilities.",
+    )
     args = parser.parse_args()
     trained = train_model(args.data, args.output)
     print(f"Saved model with {len(trained['selected_features'])} selected features.")
+    predictions = write_predictions(trained, args.data, args.predictions_output)
+    print(f"Saved {len(predictions)} predictions to {args.predictions_output}.")
